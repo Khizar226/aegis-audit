@@ -57,9 +57,9 @@ def test_entries_have_timestamp_and_user(logdir: Path) -> None:
 
 def test_single_character_tamper_detected(logdir: Path) -> None:
     p = log_path(logdir)
-    raw = p.read_text(encoding="utf-8")
+    raw = p.read_bytes().decode("utf-8")
     i = raw.index("rm -rf")
-    p.write_text(raw[:i] + "r" + raw[i + 1 :].replace("m -rf", "M -rf", 1), encoding="utf-8")
+    p.write_bytes((raw[:i] + "r" + raw[i + 1 :].replace("m -rf", "M -rf", 1)).encode("utf-8"))
     res = verify(logdir)
     assert res.exit_code == 1
     assert "TAMPER DETECTED" in res.output
@@ -81,12 +81,12 @@ def test_signature_tamper_detected(logdir: Path) -> None:
     import json
 
     p = log_path(logdir)
-    lines = p.read_text(encoding="utf-8").splitlines()
+    lines = p.read_bytes().decode("utf-8").split("\n")[:-1]
     last = json.loads(lines[-1])
     sig = last["signature"]
     last["signature"] = ("A" if sig[0] != "A" else "B") + sig[1:]
     lines[-1] = json.dumps(last)
-    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    p.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
     assert verify(logdir).exit_code == 1
 
 
@@ -146,7 +146,8 @@ def lines_of(d: Path) -> list[str]:
 
 
 def write_lines(d: Path, ls: list[str]) -> None:
-    log_path(d).write_text("".join(x + "\n" for x in ls), encoding="utf-8")
+    # bytes, not write_text: on Windows text mode would turn \n into \r\n
+    log_path(d).write_bytes("".join(x + "\n" for x in ls).encode("utf-8"))
 
 
 def mutate(d: Path, i: int, **changes) -> None:
@@ -274,7 +275,7 @@ def atk_unicode_reencode(d):
 
 
 def atk_missing_newline(d):
-    log_path(d).write_text(log_path(d).read_text(encoding="utf-8").rstrip("\n"), encoding="utf-8")
+    log_path(d).write_bytes(log_path(d).read_bytes().rstrip(b"\n"))
 
 
 ATTACKS = {
@@ -494,3 +495,10 @@ def test_cli_survives_legacy_console_encoding(logdir: Path) -> None:
     env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
     p = subprocess.run([sys.executable, "-m", "aegis_audit", "verify", "-d", str(logdir)], capture_output=True, env=env)
     assert p.returncode == 0, p.stderr.decode("cp1252", "replace")
+
+
+def test_crlf_conversion_gets_a_clear_diagnosis(logdir: Path) -> None:
+    """Editors / git core.autocrlf can rewrite line endings; say so instead of a cryptic error."""
+    log_path(logdir).write_bytes(log_path(logdir).read_bytes().replace(b"\n", b"\r\n"))
+    res = verify(logdir)
+    assert res.exit_code == 1 and "CRLF" in res.output

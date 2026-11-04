@@ -356,6 +356,11 @@ class AuditLog:
             # duplicate keys (parser ambiguity), blank lines and re-formatting.
             if not isinstance(obj, dict) or set(obj) != LINE_KEYS:
                 return fail(f"line {n}: unexpected or missing fields")
+            if raw.endswith("\r") and canonical(obj) == raw[:-1]:
+                return fail(
+                    f"line {n}: CRLF line ending; the file was rewritten (editor or git core.autocrlf). "
+                    "Restore the original bytes"
+                )
             if canonical(obj) != raw:
                 return fail(f"line {n}: not in canonical form (duplicate keys, extra whitespace or re-encoding)")
             if obj["v"] != FORMAT_VERSION or type(obj["seq"]) is not int or type(obj["tree_size"]) is not int:
